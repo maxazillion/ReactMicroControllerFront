@@ -1,0 +1,103 @@
+import network
+import time
+import usocket as socket
+import machine
+import _thread
+
+
+def get_ip_address():
+    wifi = network.WLAN(network.STA_IF)
+    ip_address = wifi.ifconfig()[0]
+    return ip_address
+
+def handle_request(client_socket):
+    request = client_socket.readline()
+    print("Request:", request)
+    
+    if b"GET /toggle_lights" in request:
+        params = parse_request_params(request)
+        if b"numbers=" in params:
+            numbers_param = extract_param_value(params, b"numbers=")
+            numbers = [int(num) for num in numbers_param.split(b',')]
+            
+            for num in numbers:
+                toggle_light(num)
+        
+        client_socket.send("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nLight toggled")
+    else:
+        client_socket.send("HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\nUnknown command")
+    
+    client_socket.close()
+
+def parse_request_params(request):
+    params_start = request.find(b"?")
+    if params_start != -1:
+        params_end = request.find(b" ", params_start)
+        if params_end != -1:
+            return request[params_start+1:params_end]
+    return b""
+
+def extract_param_value(params, param_name):
+    param_start = params.find(param_name)
+    if param_start != -1:
+        value_start = param_start + len(param_name)
+        value_end = params.find(b"&", value_start)
+        if value_end == -1:
+            value_end = len(params)
+        return params[value_start:value_end]
+    return b""
+
+def toggle_light(number):
+    
+    if number < 28 or number > 0:
+        pin = machine.Pin(number, machine.Pin.OUT)
+        pin.value(not pin.value())
+    else:
+        print(f"No GPIO pin for number {number}")
+
+def connect_to_wifi(ssid, password):
+    wifi = network.WLAN(network.STA_IF)
+    wifi.active(True)
+    connected = False
+    attempts = 0
+    
+    while not connected and attempts < 3:  # Try to connect 3 times
+        print("Attempting to connect to Wi-Fi...")
+        wifi.connect(ssid, password)
+        time.sleep(5)  # Wait for connection attempt to complete
+        
+        if wifi.isconnected():
+            print("Connected to Wi-Fi")
+            connected = True
+        else:
+            print("Failed to connect to Wi-Fi")
+            attempts += 1
+
+    return connected
+
+def check_network_status():
+    wifi = network.WLAN(network.STA_IF)
+    while True:
+        if not wifi.isconnected():
+            print("Network disconnected!")
+            connect_to_wifi(wifi_ssid, wifi_password)
+        time.sleep(10)
+
+wifi_ssid = "Dingledorph"
+wifi_password = ""
+
+connected_to_wifi = connect_to_wifi(wifi_ssid, wifi_password)
+if not connected_to_wifi:
+    print("Failed to connect to Wi-Fi after multiple attempts. Exiting.")
+_thread.start_new_thread(check_network_status, ())
+server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server_socket.bind(("0.0.0.0", 80))
+server_socket.listen(1)
+print(get_ip_address())
+
+while True:
+    print("this is the starting point")
+    client_socket, addr = server_socket.accept()
+    handle_request(client_socket)
+    print("Server socket is bound to: ", server_socket)
+
